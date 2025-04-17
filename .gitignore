@@ -1,5 +1,8 @@
 .deps/
 .github/
+.cache/
+.cache/
+compile_commands.json
 autom4te.cache
 config.log
 config.h

@@ -37,6 +37,7 @@
 #endif /* HAVE_LIBUTIL_H */
 
 #ifdef HAVE_UNAME
+#include <stddef.h>
 # include <sys/utsname.h>
 #endif
 
@@ -178,7 +179,11 @@ void shutdown_end_session(void *d1, void *d2, void *d3, void *d4) {
       }
     }
 
-    time(&now);
+    time_t result = time(&now);
+    if (result == (time_t)(-1)) {
+      pr_log_pri(PR_LOG_INFO,"time returned -1, ignoring ..."); 
+    }
+
     if (authenticated && *authenticated == TRUE) {
       user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
 
@@ -205,6 +210,7 @@ void shutdown_end_session(void *d1, void *d2, void *d3, void *d4) {
     pr_session_disconnect(NULL, PR_SESS_DISCONNECT_SERVER_SHUTDOWN, NULL);
   }
 
+  /* NOLINTNEXTLINE */
   if (signal(SIGUSR1, pr_signals_handle_disconnect) == SIG_ERR) {
     pr_log_pri(PR_LOG_NOTICE,
       "unable to install SIGUSR1 (signal %d) handler: %s", SIGUSR1,
@@ -229,7 +235,8 @@ static int get_command_class(const char *name) {
   return (c ? c->cmd_class : CL_ALL);
 }
 
-static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
+/* NOLINTNEXTLINE(bugprone-easily-swappable-parameters) */
+static int dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
   const char *cmdargstr = NULL;
   cmdtable *c;
   modret_t *mr;
@@ -507,7 +514,7 @@ int pr_cmd_read(cmd_rec **res) {
          * them a few more chances, with minor delays?
          */
         too_large_count++;
-        pr_timer_usleep(250 * 1000);
+        pr_timer_usleep((unsigned long)(250 * 1000));
 
         if (too_large_count > 3) {
           return -1;
@@ -618,6 +625,7 @@ static int set_cmd_start_ms(cmd_rec *cmd) {
   return pr_table_add(cmd->notes, "start_ms", v, sizeof(uint64_t));
 }
 
+/* NOLINTNEXTLINE(bugprone-easily-swappable-parameters) */
 int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
   char *cp = NULL;
   int success = 0, xerrno = 0;
@@ -672,20 +680,20 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
 
   if (phase == 0) {
     /* First, dispatch to wildcard PRE_CMD handlers. */
-    success = _dispatch(cmd, PRE_CMD, FALSE, C_ANY);
+    success = dispatch(cmd, PRE_CMD, FALSE, C_ANY);
     if (success == 0) {
       /* No success yet?  Run other PRE_CMD phase handlers. */
-      success = _dispatch(cmd, PRE_CMD, FALSE, NULL);
+      success = dispatch(cmd, PRE_CMD, FALSE, NULL);
     }
 
     if (success < 0) {
       /* Dispatch to POST_CMD_ERR handlers as well. */
 
-      _dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
-      _dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
+      dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
+      dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
 
-      _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
-      _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
+      dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
+      dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
 
       xerrno = errno;
       pr_trace_msg("response", 9, "flushing error response list for '%s'",
@@ -699,19 +707,19 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
       return success;
     }
 
-    success = _dispatch(cmd, CMD, FALSE, C_ANY);
+    success = dispatch(cmd, CMD, FALSE, C_ANY);
     if (success == 0) {
-      success = _dispatch(cmd, CMD, TRUE, NULL);
+      success = dispatch(cmd, CMD, TRUE, NULL);
     }
 
     if (success == 1) {
-      success = _dispatch(cmd, POST_CMD, FALSE, C_ANY);
+      success = dispatch(cmd, POST_CMD, FALSE, C_ANY);
       if (success == 0) {
-        success = _dispatch(cmd, POST_CMD, FALSE, NULL);
+        success = dispatch(cmd, POST_CMD, FALSE, NULL);
       }
 
-      _dispatch(cmd, LOG_CMD, FALSE, C_ANY);
-      _dispatch(cmd, LOG_CMD, FALSE, NULL);
+      dispatch(cmd, LOG_CMD, FALSE, C_ANY);
+      dispatch(cmd, LOG_CMD, FALSE, NULL);
 
       xerrno = errno;
       pr_trace_msg("response", 9, "flushing response list for '%s'",
@@ -723,13 +731,13 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
     } else if (success < 0) {
       /* Allow for non-logging command handlers to be run if CMD fails. */
 
-      success = _dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
+      success = dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
       if (success == 0) {
-        success = _dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
+        success = dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
       }
 
-      _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
-      _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
+      dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
+      dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
 
       xerrno = errno;
       pr_trace_msg("response", 9, "flushing error response list for '%s'",
@@ -744,24 +752,24 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
       case PRE_CMD:
       case POST_CMD:
       case POST_CMD_ERR:
-        success = _dispatch(cmd, phase, FALSE, C_ANY);
+        success = dispatch(cmd, phase, FALSE, C_ANY);
         if (success == 0) {
-          success = _dispatch(cmd, phase, FALSE, NULL);
+          success = dispatch(cmd, phase, FALSE, NULL);
           xerrno = errno;
         }
         break;
 
       case CMD:
-        success = _dispatch(cmd, phase, FALSE, C_ANY);
+        success = dispatch(cmd, phase, FALSE, C_ANY);
         if (success == 0) {
-          success = _dispatch(cmd, phase, TRUE, NULL);
+          success = dispatch(cmd, phase, TRUE, NULL);
         }
         break;
 
       case LOG_CMD:
       case LOG_CMD_ERR:
-        (void) _dispatch(cmd, phase, FALSE, C_ANY);
-        (void) _dispatch(cmd, phase, FALSE, NULL);
+        (void) dispatch(cmd, phase, FALSE, C_ANY);
+        (void) dispatch(cmd, phase, FALSE, NULL);
         break;
 
       default:
@@ -802,6 +810,7 @@ int pr_cmd_dispatch(cmd_rec *cmd) {
     PR_CMD_DISPATCH_FL_SEND_RESPONSE|PR_CMD_DISPATCH_FL_CLEAR_RESPONSE);
 }
 
+/* NOLINTNEXTLINE(bugprone-easily-swappable-parameters) */
 static cmd_rec *make_ftp_cmd(pool *p, char *buf, size_t buflen, int flags) {
   register unsigned int i, j;
   char *arg, *ptr, *wrd;
@@ -914,7 +923,7 @@ static cmd_rec *make_ftp_cmd(pool *p, char *buf, size_t buflen, int flags) {
   }
 
   *((char **) push_array(tarr)) = NULL;
-  cmd->argv = tarr->elts;
+  cmd->argv = (void **)tarr->elts;
   pr_pool_tag(cmd->pool, cmd->argv[0]);
 
   /* This table will not contain that many entries, so a low number
@@ -1273,12 +1282,14 @@ static void fork_server(int fd, conn_t *l, unsigned char no_fork) {
 #endif /* PR_DEVEL_NO_FORK */
 
   /* Child is running here */
+  /* NOLINTNEXTLINE : issues with asynch safety verification */
   if (signal(SIGUSR1, pr_signals_handle_disconnect) == SIG_ERR) {
     pr_log_pri(PR_LOG_NOTICE,
       "unable to install SIGUSR1 (signal %d) handler: %s", SIGUSR1,
       strerror(errno));
   }
 
+  /* NOLINTNEXTLINE */
   if (signal(SIGUSR2, pr_signals_handle_event) == SIG_ERR) {
     pr_log_pri(PR_LOG_NOTICE,
       "unable to install SIGUSR2 (signal %d) handler: %s", SIGUSR2,
@@ -1413,7 +1424,11 @@ static void fork_server(int fd, conn_t *l, unsigned char no_fork) {
   if (shutting_down == TRUE) {
     time_t now;
 
-    time(&now);
+    time_t result = time(&now);
+    if (result == (time_t)(-1)) {
+      pr_log_pri(PR_LOG_INFO, "time retured -1, ignoring ...");
+    }
+
     if (!deny || deny <= now) {
       pool *tmp_pool;
       config_rec *c = NULL;
@@ -1591,7 +1606,10 @@ static void daemon_loop(void) {
 
   pr_proctitle_set("(accepting connections)");
 
-  time(&last_error);
+  time_t result = time(&last_error);
+  if (result == (time_t)(-1)) {
+    pr_log_pri(PR_LOG_INFO, "time retured -1, ignoring ...");
+  }
 
   while (TRUE) {
     int maxfd, res;
@@ -1704,7 +1722,10 @@ static void daemon_loop(void) {
     if (i == -1) {
       time_t this_error;
 
-      time(&this_error);
+      time_t result = time(&this_error);
+      if (result == (time_t)(-1)) {
+        pr_log_pri(PR_LOG_INFO, "time returned -1, ignoring ...");
+      }
 
       if ((this_error - last_error) <= 5 && err_count++ > 10) {
         pr_log_pri(PR_LOG_ERR, "fatal: select(2) failing repeatedly, shutting "
@@ -1990,7 +2011,7 @@ static void standalone_main(void) {
 
   daemon_loop();
 }
-
+/* NOLINTNEXTLINE(bugprone-easily-swappable-parameters) */
 static int conftab_cmp(const void *a, const void *b) {
   const conftable *tab1, *tab2;
 
@@ -2030,7 +2051,7 @@ static void list_directives(void) {
     tab = pr_stash_get_symbol2(PR_SYM_CONF, NULL, tab, &idx, &hash);
   }
 
-  qsort((void *) directives->elts, directives->nelts, sizeof(conftable **),
+  qsort(directives->elts, directives->nelts, sizeof(conftable **),
     conftab_cmp);
 
   printf("Configuration Directives:\n");
@@ -2044,8 +2065,10 @@ static void list_directives(void) {
   destroy_pool(tmp_pool);
 }
 
+// NOLINTBEGIN
 extern char *optarg;
 extern int optind, opterr, optopt;
+// NOLINTEND
 
 #if defined(HAVE_GETOPT_LONG)
 static struct option opts[] = {
@@ -2579,7 +2602,10 @@ int main(int argc, char *argv[], char **envp) {
     case 't':
       syntax_check = 1;
       printf("%s", "Checking syntax of configuration file\n");
-      fflush(stdout);
+      if (fflush(stdout) == EOF) {
+        pr_log_pri(PR_LOG_WARNING, "fflush to stdout returned EOF: %s",
+                   strerror(errno));
+      }
       break;
 
     /* Note: This is now unused, and should be deprecated in the next release.
@@ -2622,6 +2648,11 @@ int main(int argc, char *argv[], char **envp) {
 
     case '?':
       pr_log_pri(PR_LOG_WARNING, "unknown option: %c", (char) optopt);
+      show_usage(1);
+      break;
+
+    default:
+      pr_log_pri(PR_LOG_WARNING, "bad option passed: %c", (char) optopt);
       show_usage(1);
       break;
     }
@@ -2828,6 +2859,9 @@ int main(int argc, char *argv[], char **envp) {
       mpid = 0;
       inetd_main();
       break;
+
+    default:
+      pr_log_pri(PR_LOG_ERR,"fatal: unexpected value for server type: %c", ServerType); 
   }
 
 #ifdef PR_DEVEL_NO_DAEMON
